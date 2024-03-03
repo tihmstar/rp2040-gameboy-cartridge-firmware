@@ -72,4 +72,23 @@ void loadDoubleSpeedPio();
 void storeSaveRamInFile(uint32_t game);
 void restoreSaveRamFromFile(uint32_t game);
 
+struct __attribute__((packed)) GbRtc {
+  uint8_t seconds;
+  uint8_t minutes;
+  uint8_t hours;
+  uint8_t days;
+  union {
+    struct {
+      uint8_t days_carry:1;
+      uint8_t reserved:5;
+      uint8_t halt:1;
+      uint8_t days_high:1;
+    };
+    uint8_t asByte;
+  } status;
+};
+
+extern volatile struct GbRtc g_rtcReal;
+extern volatile struct GbRtc g_rtcLatched;
+
 #endif /* A6E4EABE_18C1_4BCB_A021_7C59DEE53104 */
