@@ -10,8 +10,8 @@
 #include <gbdk/font.h>
 #include <gbdk/platform.h>
 
-#include "giraffe_4color_data.c"
-#include "giraffe_4color_map.c"
+#include "giraffe_4color_data.h"
+#include "giraffe_4color_map.h"
 
 #pragma mark defines
 
