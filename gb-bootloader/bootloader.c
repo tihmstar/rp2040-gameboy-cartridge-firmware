@@ -299,16 +299,16 @@ uint8_t drawscreenSystemInfo(){
   if (buttonPressed(J_SELECT)) {
     return MENU_GAME_MENU;
 
-  }else if (buttonPressed(J_START)) {
-    gotoxy(0, 14);
-    printf("Started RP2040 BTLD");
-    wait_vbl_done();
-    disable_interrupts();
-    *SMEM_ADDR_RP2040_BOOTLOADER = 1;
-    wait_vbl_done();
-    while (1) {
-      wait_vbl_done();
-    }
+  // }else if (buttonPressed(J_START)) {
+  //   gotoxy(0, 14);
+  //   printf("Started RP2040 BTLD");
+  //   wait_vbl_done();
+  //   disable_interrupts();
+  //   *SMEM_ADDR_RP2040_BOOTLOADER = 1;
+  //   wait_vbl_done();
+  //   while (1) {
+  //     wait_vbl_done();
+  //   }
 
   }else if (buttonPressed(J_RIGHT)) {
     return MENU_RGB_TESTER;
