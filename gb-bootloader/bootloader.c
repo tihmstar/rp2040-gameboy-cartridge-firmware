@@ -702,37 +702,37 @@ void sanitizeRTCRom(struct CfgRTCROM *rtc){
   //no checks needed for DL
 
   switch(rtc->dh){
-    case 0b00000001+1:
-      rtc->dh = 0b01000000;
+    case 0x01+1:
+      rtc->dh = 0x40;
       break;
 
-    case 0b01000001+1:
-      rtc->dh = 0b10000000;
+    case 0x41+1:
+      rtc->dh = 0x80;
       break;
 
-    case 0b10000001+1:
-      rtc->dh = 0b11000000;
+    case 0x81+1:
+      rtc->dh = 0xC0;
       break;
 
-    case 0b11000001+1:
-      rtc->dh = 0;
+    case 0xC1+1:
+      rtc->dh = 0x00;
       break;
 
-    case 0b11000000-1:
-      rtc->dh = 0b10000001;
+    case 0xC0-1:
+      rtc->dh = 0x81;
       break;
 
-    case 0b10000000-1:
-      rtc->dh = 0b01000001;
+    case 0x80-1:
+      rtc->dh = 0x41;
       break;
 
-    case 0b01000000-1:
-      rtc->dh = 0b00000001;
+    case 0x40-1:
+      rtc->dh = 0x01;
       break;
 
     default:
-    rtc->dh &= 0b11000001;
-    break;
+      rtc->dh &= 0b11000001;
+      break;
   }
 }
 
