@@ -434,7 +434,8 @@ uint8_t drawscreenGameSettingsRTC(){
       gForceDrawScreen = 1;
     }
   }else if (buttonPressed(J_START)) {
-    rtc_needs_commiting = RTC_COMMITING_MASK_ROM | RTC_COMMITING_MASK_REAL;
+    if (selectedRow == ROW_RTC_REAL) rtc_needs_commiting = RTC_COMMITING_MASK_ROM;
+    else rtc_needs_commiting = RTC_COMMITING_MASK_REAL;
     gForceDrawScreen = 1;
   }else if (buttonPressed(J_A)) {
     if (selectionX == 0xFF){
