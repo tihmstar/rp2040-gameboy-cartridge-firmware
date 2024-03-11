@@ -328,11 +328,6 @@ void __no_inline_not_in_flash_func(runGbBootloader)(uint8_t *selectedGame,
             break;
           }
         }
-
-        if (addr == 0xB011) {
-          sleep_ms(50);
-          reset_usb_boot(0, 0);
-        }
       }
     }
 
