@@ -47,6 +47,9 @@ extern const volatile uint8_t *volatile ram_base;
 extern const volatile uint8_t *volatile rom_low_base;
 extern volatile uint32_t rom_high_base_flash_direct;
 
+extern volatile uint8_t *_rtcLatchPtr;
+extern volatile uint8_t *_rtcRealPtr;
+
 extern uint8_t memory[];
 extern uint8_t ram_memory[];
 extern uint8_t memory_vblank_hook_bank[];
@@ -80,5 +83,28 @@ void restoreSaveRamFromFile(const struct ShortRomInfo *shortRomInfo);
 #define cassure(a) do{ if ((a) == 0){err=__LINE__; goto error;} }while(0)
 #define cretassure(cond, errstr ...) do{ if ((cond) == 0){err=__LINE__;printf(errstr); goto error;} }while(0)
 #define creterror(errstr ...) do{printf(errstr);err=__LINE__; goto error; }while(0)
+
+struct __attribute__((packed)) GbRtc {
+  uint8_t seconds;
+  uint8_t minutes;
+  uint8_t hours;
+  uint8_t days;
+  union {
+    struct {
+      uint8_t days_high : 1;
+      uint8_t reserved : 5;
+      uint8_t halt : 1;
+      uint8_t days_carry : 1;
+    };
+    uint8_t asByte;
+  } status;
+};
+union GbRtcUnion {
+  struct GbRtc reg;
+  uint8_t asArray[5];
+};
+
+extern volatile union GbRtcUnion g_rtcReal;
+extern volatile union GbRtcUnion g_rtcLatched;
 
 #endif /* A6E4EABE_18C1_4BCB_A021_7C59DEE53104 */

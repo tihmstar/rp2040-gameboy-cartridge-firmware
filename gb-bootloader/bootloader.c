@@ -747,6 +747,7 @@ void startGame(uint8_t game, uint8_t mode) {
     vsync();
   }
 }
+
 void loadROMRTCForGame(uint8_t game, struct CfgRTCROM *rtc){
 #warning TODO: read this like a normal game would
   (void)game;
