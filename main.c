@@ -105,7 +105,9 @@ int main() {
     sleep_ms(2);
   }
 
+#ifdef DEBUG 
   stdio_uart_init_full(uart0, 500000, 28, -1);
+#endif
 
   printf("Hello RP2040 Croco Cartridge %d.%d.%d %s-%.7X(%s)\n",
          RP2040_GB_CARTRIDGE_VERSION_MAJOR, RP2040_GB_CARTRIDGE_VERSION_MINOR,
