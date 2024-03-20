@@ -57,7 +57,7 @@
 #include "mbc.h"
 #include "webusb.h"
 #include "ws2812b_spi.h"
-
+#include "GbRtc.h"
 #include "gameboy_bus.pio.h"
 
 #define SMEM_ADDR_START               ((uint16_t)(0xA000))
@@ -418,7 +418,7 @@ void __no_inline_not_in_flash_func(runGbBootloader)(uint8_t *selectedGame,
                 restoreSaveRamFromFile(&sRI, &savedTimestamp);
                 int64_t diff = g_fakeTimestamp - savedTimestamp;
                 if (diff > 0){
-                  GbRtc_ProgressRtcWithSeconds(&g_rtcReal,diff);
+                  GbRtc_ProgressRtcWithSeconds((union GbRtcUnion *)&g_rtcReal,diff);
                   storeSaveRamInFile(&sRI);
                 }
                 memcpy(&ram[SMEM_ADDR_ROMTIME-SMEM_ADDR_START], (void*)&g_rtcReal, sizeof(g_rtcReal));
