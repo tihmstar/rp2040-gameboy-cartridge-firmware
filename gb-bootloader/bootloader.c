@@ -32,13 +32,20 @@
 #define MAX_GAMES_RENDER_NUM 17
 #define CHARS_PER_ROW 20
 
+#define SMEM_ADDR_START               ((UBYTE *)(0xA000))
 #define SMEM_ADDR_LED_CONTROL         ((UBYTE *)(0xB010))
 #define SMEM_ADDR_RP2040_BOOTLOADER   ((UBYTE *)(0xB011))
 #define SMEM_ADDR_GAME_MODE_SELECTOR  ((UBYTE *)(0xB000))
 #define SMEM_ADDR_GAME_SELECTOR       ((UBYTE *)(0xB001))
 #define SMEM_ADDR_GAME_CONTROL        ((UBYTE *)(0xB002))
 
+#define SMEM_ADDR_REALTIME_CONTROL    ((UBYTE *)(0xB018))
+#define SMEM_ADDR_REALTIME            ((UBYTE *)(0xB020))
+
 #define SMEM_GAME_START_MAGIC 42
+#define SMEM_REALTIME_GET_MAGIC 69
+#define SMEM_REALTIME_SET_MAGIC 13
+#define SMEM_REALTIME_IDLE_MAGIC 37
 
 #pragma mark colors
 #define DMG_BKG_SELECTED_PALETTE    DMG_PALETTE(DMG_DARK_GRAY, DMG_LITE_GRAY, DMG_BLACK, DMG_WHITE);
@@ -83,6 +90,7 @@ struct CfgRTCReal{
   uint8_t d;   //day    0-30
   uint8_t mon; //month  0-11
   uint8_t year;//year   0-255 (+1970) -> 1970-2225
+  int8_t utcOffset; //in steps of 15min, valid from -12:00 to +14:00
 };
 
 
@@ -110,7 +118,7 @@ static uint8_t gDMGHighlightLine = 0xFF;
 
 
 #pragma mark shared mem globals
-struct SharedGameboyData *s_SharedData = (struct SharedGameboyData *)(0xA000);
+struct SharedGameboyData *s_SharedData = (struct SharedGameboyData *)SMEM_ADDR_START;
 struct SharedGameboyData *_sharedDataLocalCopy = NULL;
 #define s_GamesCount _sharedDataLocalCopy->number_of_roms
 
@@ -411,6 +419,7 @@ uint8_t drawscreenGameSettingsRTC(){
   static uint8_t *modval = (uint8_t*)&rom_rtc;
 #define ROW_RTC_ROM  8
 #define ROW_RTC_REAL 12
+#define ROW_RTC_REAL_UTC 14
 #define RTC_COMMITING_MASK_ROM 1
 #define RTC_COMMITING_MASK_REAL 2
   uint8_t rtc_needs_commiting = 0;
@@ -434,7 +443,7 @@ uint8_t drawscreenGameSettingsRTC(){
       gForceDrawScreen = 1;
     }
   }else if (buttonPressed(J_START)) {
-    if (selectedRow == ROW_RTC_REAL) rtc_needs_commiting = RTC_COMMITING_MASK_ROM;
+    if (selectedRow == ROW_RTC_ROM) rtc_needs_commiting = RTC_COMMITING_MASK_ROM;
     else rtc_needs_commiting = RTC_COMMITING_MASK_REAL;
     gForceDrawScreen = 1;
   }else if (buttonPressed(J_A)) {
@@ -442,46 +451,62 @@ uint8_t drawscreenGameSettingsRTC(){
       selectionX = 0;
       if (selectedRow == ROW_RTC_REAL) selectionX = 1;
     }else{
-      if (selectedRow == ROW_RTC_REAL) rtc_needs_commiting = RTC_COMMITING_MASK_ROM;
+      if (selectedRow == ROW_RTC_ROM) rtc_needs_commiting = RTC_COMMITING_MASK_ROM;
       else rtc_needs_commiting = RTC_COMMITING_MASK_REAL;
     }
     gForceDrawScreen = 1;
   }else if (buttonPressed(J_UP)) {
     if (selectionX == 0xFF){
       if (selectedRow == ROW_RTC_REAL) selectedRow = ROW_RTC_ROM;
+      else if (selectedRow == ROW_RTC_REAL_UTC) selectedRow = ROW_RTC_REAL;
     }else{
-      if (selectedRow == ROW_RTC_REAL) modval = (uint8_t*)&real_rtc;
-      else modval = (uint8_t*)&rom_rtc;
+      if (selectedRow == ROW_RTC_REAL_UTC){
+        real_rtc.utcOffset++;
+        sanitizeRTCReal(&real_rtc);
+      }else{
+        if (selectedRow == ROW_RTC_REAL) modval = (uint8_t*)&real_rtc;
+        else modval = (uint8_t*)&rom_rtc;
 
-      uint8_t oldval = ++modval[selectionX];
-      sanitizeRTCRom(&rom_rtc);
-      sanitizeRTCReal(&real_rtc);
-      if (modval[selectionX] == oldval-1) modval[selectionX] = 0;
+        uint8_t oldval = ++modval[selectionX];
+        sanitizeRTCRom(&rom_rtc);
+        sanitizeRTCReal(&real_rtc);
+        if (modval[selectionX] == oldval-1) modval[selectionX] = 0;
+      }
     }
     gForceDrawScreen = 1;
   }else if (buttonPressed(J_DOWN)) {
     if (selectionX == 0xFF){
       if (selectedRow == ROW_RTC_ROM) selectedRow = ROW_RTC_REAL;
+      else if (selectedRow == ROW_RTC_REAL) selectedRow = ROW_RTC_REAL_UTC;
     }else{
-      if (selectedRow == ROW_RTC_REAL) modval = (uint8_t*)&real_rtc;
-      else modval = (uint8_t*)&rom_rtc;
-      
-      modval[selectionX]--;
-      sanitizeRTCRom(&rom_rtc);
-      sanitizeRTCReal(&real_rtc);
+      if (selectedRow == ROW_RTC_REAL_UTC){
+        real_rtc.utcOffset--;
+        sanitizeRTCReal(&real_rtc);
+      }else{
+        if (selectedRow == ROW_RTC_REAL) modval = (uint8_t*)&real_rtc;
+        else modval = (uint8_t*)&rom_rtc;
+        
+        modval[selectionX]--;
+        sanitizeRTCRom(&rom_rtc);
+        sanitizeRTCReal(&real_rtc);
+      }
     }
     gForceDrawScreen = 1;
   }else if (buttonPressed(J_LEFT)) {
     if (selectionX != 0xFF){
-      if (selectionX < 4 || (selectedRow == ROW_RTC_REAL && selectionX < 5)){
-       selectionX++;
+      if (selectedRow != ROW_RTC_REAL_UTC){
+        if (selectionX < 4 || (selectedRow == ROW_RTC_REAL && selectionX < 5)){
+        selectionX++;
+        }
       }
     }
     gForceDrawScreen = 1;
   }else if (buttonPressed(J_RIGHT)) {
     if (selectionX != 0xFF){
-      if ((selectedRow == ROW_RTC_ROM && selectionX > 0) || selectionX > 1){
-        selectionX--;
+      if (selectedRow != ROW_RTC_REAL_UTC){
+        if ((selectedRow == ROW_RTC_ROM && selectionX > 0) || selectionX > 1){
+          selectionX--;
+        }
       }
     }
     gForceDrawScreen = 1;    
@@ -528,7 +553,21 @@ uint8_t drawscreenGameSettingsRTC(){
     if (real_rtc.h<10)  putchar('0'); printf("%d ",real_rtc.h);
     if (real_rtc.m<10)  putchar('0'); printf("%d ",real_rtc.m);
 
-    gotoxy(1, 15);
+    gotoxy(0, 14);
+    printf("UTC");
+    {
+      int8_t offset = real_rtc.utcOffset;
+      if (offset < 0){
+        putchar('-');
+        offset *= -1;
+      }else{
+        putchar('+');
+      }
+      if (offset < 40) putchar('0'); printf("%d:",offset/4);
+      if ((offset & 3) == 0) putchar('0'); printf("%d",(offset&3)*15);
+    }
+
+    gotoxy(1, 16);
     if (rtc_needs_commiting){
       printf("[RTC config saved]");
     }else{
@@ -540,11 +579,18 @@ uint8_t drawscreenGameSettingsRTC(){
     if (selectionX == 0xFF){
       highlightLine(selectedRow);
     }else{
-      selectTile(18-selectionX*3,selectedRow,0);
-      selectTile(19-selectionX*3,selectedRow,1);
-      if (selectedRow == ROW_RTC_REAL && selectionX == 5){
-        selectTile(1,12,2);
-        selectTile(2,12,3);
+      if (selectedRow == ROW_RTC_REAL_UTC){
+        selectTile(4,selectedRow,0);
+        selectTile(5,selectedRow,1);
+        selectTile(7,selectedRow,2);
+        selectTile(8,selectedRow,3);
+      }else{
+        selectTile(18-selectionX*3,selectedRow,0);
+        selectTile(19-selectionX*3,selectedRow,1);
+        if (selectedRow == ROW_RTC_REAL && selectionX == 5){
+          selectTile(1,12,2);
+          selectTile(2,12,3);
+        }
       }
     }
   }
@@ -694,6 +740,8 @@ void sanitizeRTCReal(struct CfgRTCReal *rtc){
   if (rtc->d > maxDay) rtc->d = maxDay;
   if (rtc->h > 23) rtc->h = 23;
   if (rtc->m > 59) rtc->m = 59;
+  if (rtc->utcOffset > 56) rtc->utcOffset = -48;
+  if (rtc->utcOffset < -48) rtc->utcOffset = 56;
 }
 
 void sanitizeRTCRom(struct CfgRTCROM *rtc){
@@ -760,13 +808,9 @@ void loadROMRTCForGame(uint8_t game, struct CfgRTCROM *rtc){
 }
 
 void loadRealtimeRTC(struct CfgRTCReal *rtc){
-#warning TODO: read this from rp2040
-  rtc->m = 56;
-  rtc->h = 17;
-  rtc->d = 7;
-  rtc->mon = 2;
-  rtc->year = 54;
-  sanitizeRTCReal(rtc);
+  *SMEM_ADDR_REALTIME_CONTROL = SMEM_REALTIME_GET_MAGIC;
+  while (*SMEM_ADDR_REALTIME_CONTROL != SMEM_REALTIME_IDLE_MAGIC) vsync();
+  memcpy(rtc, SMEM_ADDR_REALTIME, sizeof(*rtc));
 }
 
 void storeROMRTCForGame(uint8_t game, struct CfgRTCROM *rtc){
@@ -776,6 +820,7 @@ void storeROMRTCForGame(uint8_t game, struct CfgRTCROM *rtc){
 }
 
 void storeRealtimeRTC(struct CfgRTCReal *rtc){
-#warning TODO: write this from rp2040
-  (void)rtc;
+  memcpy(SMEM_ADDR_REALTIME, rtc, sizeof(*rtc));
+  *SMEM_ADDR_REALTIME_CONTROL = SMEM_REALTIME_SET_MAGIC;
+  while (*SMEM_ADDR_REALTIME_CONTROL != SMEM_REALTIME_IDLE_MAGIC) vsync();
 }

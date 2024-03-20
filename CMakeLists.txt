@@ -5,7 +5,6 @@ if (NOT DEFINED BUILD_TIME_PROVIDED_VERSION)
     if (NOT DEFINED BUILD_VERSION_TYPE)
       set(BUILD_VERSION_TYPE U)
     endif()
-    set(DEBUG)
 else ()
   if (NOT DEFINED BUILD_VERSION_TYPE)
     set(BUILD_VERSION_TYPE R)
@@ -35,7 +34,7 @@ add_subdirectory(gb-bootloader)
 add_subdirectory(gb-vblankhook)
 
 add_subdirectory(libs/pico-littlefs)
-target_compile_definitions(littlefs-lib PUBLIC LFS_NO_MALLOC)
+target_compile_definitions(littlefs-lib PUBLIC LFS_NO_MALLOC LFS_NO_DEBUG LFS_NO_ERROR LFS_NO_ASSERT)
 
 add_subdirectory(libs/git-commit-tracking)
 

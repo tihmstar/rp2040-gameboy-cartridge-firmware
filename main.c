@@ -40,6 +40,7 @@
 #include <string.h>
 #include <sys/_intsup.h>
 #include <sys/_types.h>
+#include <time.h>
 
 #include <lfs.h>
 #include <lfs_pico_hal.h>
@@ -58,6 +59,24 @@
 #include "ws2812b_spi.h"
 
 #include "gameboy_bus.pio.h"
+#define USEC_PER_SEC             1000000L
+
+
+
+#define SMEM_ADDR_START               ((uint16_t)(0xA000))
+#define SMEM_ADDR_LED_CONTROL         ((uint16_t)(0xB010))
+#define SMEM_ADDR_RP2040_BOOTLOADER   ((uint16_t)(0xB011))
+#define SMEM_ADDR_GAME_MODE_SELECTOR  ((uint16_t)(0xB000))
+#define SMEM_ADDR_GAME_SELECTOR       ((uint16_t)(0xB001))
+#define SMEM_ADDR_GAME_CONTROL        ((uint16_t)(0xB002))
+
+#define SMEM_ADDR_REALTIME_CONTROL    ((uint16_t)(0xB018))
+#define SMEM_ADDR_REALTIME            ((uint16_t)(0xB020))
+
+#define SMEM_GAME_START_MAGIC 42
+#define SMEM_REALTIME_GET_MAGIC 69
+#define SMEM_REALTIME_SET_MAGIC 13
+#define SMEM_REALTIME_IDLE_MAGIC 37
 
 const volatile uint8_t *volatile ram_base = NULL;
 const volatile uint8_t *volatile rom_low_base = NULL;
@@ -75,6 +94,8 @@ ram_memory[(GB_MAX_RAM_BANKS + 1) * GB_RAM_BANK_SIZE]
 
 volatile union GbRtcUnion __attribute__((section(".noinit."))) g_rtcReal;
 volatile union GbRtcUnion __attribute__((section(".noinit."))) g_rtcLatched;
+volatile uint64_t __attribute__((section(".noinit."))) g_fakeTimestamp;
+volatile int16_t __attribute__((section(".noinit."))) g_fakeTimestampUTCMinOffset;
 
 uint8_t g_numRoms = 0;
 const uint8_t *g_loadedRomBanks[MAX_BANKS_PER_ROM];
@@ -93,6 +114,10 @@ static uint16_t _mainStateMachineCopy
     [sizeof(gameboy_bus_double_speed_program_instructions) / sizeof(uint16_t)];
 
 void runGbBootloader(uint8_t *selectedGame, uint8_t *selectedGameMode);
+
+int storeFakeTimestamp(void);
+int loadFakeTimestamp(void);
+void tickFakeTimestamp(void);
 
 int main() {
   // bi_decl(bi_program_description("Sample binary"));
@@ -217,11 +242,9 @@ int main() {
 
   if (lfs_err != LFS_ERR_OK) {
     printf("Final error mounting FS %d\n", lfs_err);
-  } else {
-    printf("mounted\n");
   }
 
-  lfs_err = lfs_mkdir(&_lfs, "/saves");
+  lfs_err = lfs_mkdir(&_lfs, SAVES_DIR_PATH);
   if ((lfs_err != LFS_ERR_OK) && (lfs_err != LFS_ERR_EXIST)) {
     printf("Error creating saves directory %d\n", lfs_err);
   }
@@ -233,9 +256,11 @@ int main() {
 
     if (g_loadedShortRomInfo.numRamBanks > 0) {
       storeSaveRamInFile(&g_loadedShortRomInfo);
-
       _lastRunningGame = 0xFF;
     }
+    storeFakeTimestamp();
+  }else{
+    loadFakeTimestamp();
   }
 
   uint8_t game = 0xFF, mode = 0;
@@ -272,6 +297,7 @@ struct __attribute__((packed)) SharedGameboyData {
 void __no_inline_not_in_flash_func(runGbBootloader)(uint8_t *selectedGame,
                                                     uint8_t *selectedGameMode) {
   // use spare RAM bank to not overwrite potential save
+  bool cartridgeIsInGameboy = false;
   uint8_t *ram = &ram_memory[GB_MAX_RAM_BANKS * GB_RAM_BANK_SIZE];
   struct SharedGameboyData *shared_data = (void *)ram;
 
@@ -299,7 +325,7 @@ void __no_inline_not_in_flash_func(runGbBootloader)(uint8_t *selectedGame,
     }
   }
   shared_data->number_of_roms = g_numRoms;
-  ram[0x1001] = 0xFF;
+  ram[SMEM_ADDR_GAME_SELECTOR-SMEM_ADDR_START] = 0xFF;
 
   printf("Found %d games\n", g_numRoms);
 
@@ -311,6 +337,7 @@ void __no_inline_not_in_flash_func(runGbBootloader)(uint8_t *selectedGame,
 
   while (*selectedGame == 0xFF) {
     if (!pio_sm_is_rx_fifo_empty(pio1, SMC_GB_MAIN)) {
+      cartridgeIsInGameboy = true;
       uint32_t rdAndAddr = *((uint32_t *)(&pio1->rxf[SMC_GB_MAIN]));
       bool write = rdAndAddr & 0x00000001;
       uint16_t addr = (rdAndAddr >> 1) & 0xFFFF;
@@ -318,12 +345,12 @@ void __no_inline_not_in_flash_func(runGbBootloader)(uint8_t *selectedGame,
       if (write) {
         uint8_t data = pio_sm_get_blocking(pio1, SMC_GB_MAIN) & 0xFF;
 
-        if ((addr == 0xB002) && (data == 42)) {
-          *selectedGame = ram[0x1001];
-          *selectedGameMode = ram[0x1000];
+        if ((addr == SMEM_ADDR_GAME_CONTROL) && (data == SMEM_GAME_START_MAGIC)) {
+          *selectedGame = ram[SMEM_ADDR_GAME_SELECTOR-SMEM_ADDR_START];
+          *selectedGameMode = ram[SMEM_ADDR_GAME_MODE_SELECTOR-SMEM_ADDR_START];
           printf("Selected Game: %d\n", *selectedGame);
-        }
-        if (addr == 0xB010) {
+
+        }else if (addr == SMEM_ADDR_LED_CONTROL) {
           switch (data) {
           case 1:
             ws2812b_setRgb(0x15, 0, 0);
@@ -338,11 +365,53 @@ void __no_inline_not_in_flash_func(runGbBootloader)(uint8_t *selectedGame,
             ws2812b_setRgb(0, 0, 0);
             break;
           }
+
+        } else if (addr == SMEM_ADDR_REALTIME_CONTROL){
+          switch (data) {
+            case SMEM_REALTIME_GET_MAGIC:
+              {
+                struct GB_CfgRTCReal *gbrtc = (struct GB_CfgRTCReal *)&ram[SMEM_ADDR_REALTIME-SMEM_ADDR_START];
+                time_t rawtime = g_fakeTimestamp + g_fakeTimestampUTCMinOffset;
+                struct tm *tm = localtime(&rawtime);
+                gbrtc->s = 0;
+                gbrtc->m = tm->tm_min;
+                gbrtc->h = tm->tm_hour;
+                gbrtc->d = tm->tm_mday;
+                gbrtc->mon = tm->tm_mon;
+                gbrtc->year = tm->tm_year-70;
+                gbrtc->utcOffset = g_fakeTimestampUTCMinOffset / 15;
+                ram[SMEM_ADDR_REALTIME_CONTROL-SMEM_ADDR_START] = SMEM_REALTIME_IDLE_MAGIC;
+              }
+              break;
+
+            case SMEM_REALTIME_SET_MAGIC:
+              {
+                struct GB_CfgRTCReal *gbrtc = (struct GB_CfgRTCReal *)&ram[SMEM_ADDR_REALTIME-SMEM_ADDR_START];
+                struct tm tm = {
+                  .tm_sec = 0,
+                  .tm_min = gbrtc->m,
+                  .tm_hour = gbrtc->h,
+                  .tm_mday = gbrtc->d,
+                  .tm_mon = gbrtc->mon,
+                  .tm_year = gbrtc->year+70,
+                };
+                time_t rawtime = mktime(&tm);
+                g_fakeTimestampUTCMinOffset = gbrtc->utcOffset * 15;
+                g_fakeTimestamp = rawtime - g_fakeTimestampUTCMinOffset;
+                storeFakeTimestamp();
+                ram[SMEM_ADDR_REALTIME_CONTROL-SMEM_ADDR_START] = SMEM_REALTIME_IDLE_MAGIC;
+              }
+              break;
+
+            default:
+              break;
+          }
         }
       }
     }
+    tickFakeTimestamp();
 
-    usb_run();
+    if (!cartridgeIsInGameboy) usb_run();
   }
 
   usb_shutdown();
@@ -454,27 +523,82 @@ void restoreSaveRamFromFile(const struct ShortRomInfo *shortRomInfo) {
 }
 
 void storeSaveRamInFile(const struct ShortRomInfo *shortRomInfo) {
+  int err = 0;
   lfs_file_t file;
   int lfs_err;
   struct lfs_file_config fileconfig = {.buffer = _lfsFileBuffer};
-  char filenamebuffer[40] = "saves/";
-  strcpy(&filenamebuffer[strlen(filenamebuffer)],
-         (const char *)&(shortRomInfo->name));
-  printf("Saving game RAM to file %s\n", filenamebuffer);
+  char filenamebuffer[40];
+  snprintf(filenamebuffer,sizeof(filenamebuffer)-1,SAVES_DIR_PATH "%s",(const char *)&(shortRomInfo->name));
 
-  lfs_err = lfs_file_opencfg(&_lfs, &file, filenamebuffer,
-                             LFS_O_WRONLY | LFS_O_CREAT, &fileconfig);
+  cassure((lfs_err = lfs_file_opencfg(&_lfs, &file, filenamebuffer,LFS_O_WRONLY | LFS_O_CREAT, &fileconfig)) == LFS_ERR_OK);
+  cassure((lfs_err = lfs_file_write(&_lfs, &file, ram_memory, shortRomInfo->numRamBanks * GB_RAM_BANK_SIZE)) == shortRomInfo->numRamBanks * GB_RAM_BANK_SIZE);
 
-  if (lfs_err != LFS_ERR_OK) {
-    printf("Error opening file %d\n", lfs_err);
+error:
+  lfs_file_close(&_lfs, &file);
+  if (!err){
+    ws2812b_setRgb(0, 0x10, 0); // light up LED in green
+  }
+}
+
+int storeFakeTimestamp(void){
+  int err = 0;
+  bool fileIsOpen = false;
+  lfs_file_t file = {};
+  int lfs_err = 0;
+  struct lfs_file_config fileconfig = {.buffer = _lfsFileBuffer};
+  cassure((lfs_err = lfs_file_opencfg(&_lfs, &file, FAKE_TIMESTAMP_PATH, LFS_O_WRONLY | LFS_O_CREAT | LFS_O_TRUNC, &fileconfig)) == LFS_ERR_OK);
+  fileIsOpen = true;
+  cassure((lfs_err = lfs_file_write(&_lfs, &file, (void*)&g_fakeTimestamp, sizeof(g_fakeTimestamp))) == sizeof(g_fakeTimestamp));
+  cassure((lfs_err = lfs_file_write(&_lfs, &file, (void*)&g_fakeTimestampUTCMinOffset, sizeof(g_fakeTimestampUTCMinOffset))) == sizeof(g_fakeTimestampUTCMinOffset));
+
+error:
+  if (fileIsOpen) lfs_file_close(&_lfs, &file);
+  return err;
+}
+
+int loadFakeTimestamp(void){
+  int err = 0;
+  lfs_file_t file = {};
+  int lfs_err = 0;
+  bool fileIsOpen = false;
+  struct lfs_file_config fileconfig = {.buffer = _lfsFileBuffer};
+
+  lfs_err = lfs_file_opencfg(&_lfs, &file, FAKE_TIMESTAMP_PATH, LFS_O_RDONLY, &fileconfig);
+  if (lfs_err == LFS_ERR_OK){
+    fileIsOpen = true;
+    lfs_err = lfs_file_read(&_lfs, &file, (void*)&g_fakeTimestamp, sizeof(g_fakeTimestamp));
   }
 
-  lfs_err =
-      lfs_file_write(&_lfs, &file, ram_memory,
-                     shortRomInfo->numRamBanks * GB_RAM_BANK_SIZE);
-  printf("wrote %d bytes\n", lfs_err);
+  if (lfs_err != sizeof(g_fakeTimestamp)){
+    /*
+      Wed Mar 20 2024 18:44:46 GMT+0100
+    */
+    g_fakeTimestamp = 1710956686;
+    /*
+      UTC+01:00 (Germany)
+    */
+    g_fakeTimestampUTCMinOffset = 60*1;
+  }else{
+    lfs_err = lfs_file_read(&_lfs, &file, (void*)&g_fakeTimestampUTCMinOffset, sizeof(g_fakeTimestampUTCMinOffset));
+    if (lfs_err != sizeof(g_fakeTimestampUTCMinOffset)){
+      /*
+        UTC+01:00 (Germany)
+      */
+      g_fakeTimestampUTCMinOffset = 60*1;
+    }
+  }
+error:
+  if (fileIsOpen) lfs_file_close(&_lfs, &file);
+  return err;
+}
 
-  lfs_file_close(&_lfs, &file);
-
-  ws2812b_setRgb(0, 0x10, 0); // light up LED in green
+void tickFakeTimestamp(void){
+  static uint64_t _lastTimestampUpdate = 0;
+  
+  uint64_t curTime = time_us_64();
+  uint64_t diff = (curTime - _lastTimestampUpdate) / USEC_PER_SEC;
+  if (diff > 0){
+    g_fakeTimestamp += diff;
+    _lastTimestampUpdate += diff*USEC_PER_SEC;
+  }
 }

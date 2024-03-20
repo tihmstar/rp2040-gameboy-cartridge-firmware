@@ -71,8 +71,8 @@ struct __attribute__((__packed__)) RomInfoFile {
 static uint8_t _bankBuffer[GB_ROM_BANK_SIZE];
 static uint16_t _lastTransferredBank = 0xFFFF;
 static uint16_t _lastTransferredChunk = 0xFFFF;
-static char _fileNameBuffer[25] = "/roms/";
-static char _filenamebufferSaves[40] = "saves/";
+static char _fileNameBuffer[25] = ROMS_DIR_PATH;
+static char _filenamebufferSaves[40] = SAVES_DIR_PATH;
 
 static size_t _ramBytesTransferred = 0;
 
@@ -120,17 +120,17 @@ int RomStorage_init(lfs_t *lfs) {
   g_numRoms = 0;
   _usedBanks = 0;
 
-  lfs_err = lfs_mkdir(_lfs, "/roms");
+  lfs_err = lfs_mkdir(_lfs, ROMS_DIR_PATH);
   cretassure((lfs_err == LFS_ERR_OK) || (lfs_err == LFS_ERR_EXIST),"Error creating roms directory %d\n", lfs_err);
 
-  lfs_err = lfs_dir_open(_lfs, &dir, "/roms");
+  lfs_err = lfs_dir_open(_lfs, &dir, ROMS_DIR_PATH);
   cassure(lfs_err == LFS_ERR_OK);
 
   lfs_err = lfs_dir_read(_lfs, &dir, &lfsInfo);
   while (lfs_err > 0) {
     if (lfsInfo.type == LFS_TYPE_REG) {
       char filename[32];
-      snprintf(filename,sizeof(filename),"/roms/%s",lfsInfo.name);
+      snprintf(filename,sizeof(filename),ROMS_DIR_PATH "%s",lfsInfo.name);
       printf("Reading %s\n", filename);
       lfs_err = lfs_file_opencfg(_lfs, &file, filename, LFS_O_RDONLY, &_fileconfig);
       cretassure(lfs_err == LFS_ERR_OK,"Error opening file %d\n", lfs_err);
@@ -169,14 +169,14 @@ int RomStorage_loadShortRomInfo(uint32_t game, struct ShortRomInfo *outShortRomI
 
   cassure(game < g_numRoms);
 
-  lfs_err = lfs_dir_open(_lfs, &dir, "/roms");
+  lfs_err = lfs_dir_open(_lfs, &dir, ROMS_DIR_PATH);
   cassure(lfs_err == LFS_ERR_OK);
 
   lfs_err = lfs_dir_read(_lfs, &dir, &lfsInfo);
   while (lfs_err > 0) {
     if (lfsInfo.type == LFS_TYPE_REG && game-- == 0) {
       char filename[32];
-      snprintf(filename,sizeof(filename),"/roms/%s",lfsInfo.name);
+      snprintf(filename,sizeof(filename),ROMS_DIR_PATH "%s",lfsInfo.name);
       printf("RomStorage_loadShortRomInfo %s\n", filename);
       lfs_err = lfs_file_opencfg(_lfs, &file, filename, LFS_O_RDONLY, &_fileconfig);
       cretassure(lfs_err == LFS_ERR_OK,"Error opening file %d\n", lfs_err);

@@ -43,6 +43,10 @@
 #define MAX_BANKS 888
 #define MAX_BANKS_PER_ROM 0x200
 
+#define FAKE_TIMESTAMP_PATH "faketimestamp.bin"
+#define SAVES_DIR_PATH "/saves/"
+#define ROMS_DIR_PATH "/roms/"
+
 extern const volatile uint8_t *volatile ram_base;
 extern const volatile uint8_t *volatile rom_low_base;
 extern volatile uint32_t rom_high_base_flash_direct;
@@ -77,12 +81,22 @@ void restoreSaveRamFromFile(const struct ShortRomInfo *shortRomInfo);
 
 
 /*
-    libgeneral: https://github.com/tihmstar/libgeneral/blob/master/include/libgeneral/macros.h.in
+    libgeneral: https://github.com/tihmstar/libgeneral
 */
 
-#define cassure(a) do{ if ((a) == 0){err=__LINE__; goto error;} }while(0)
-#define cretassure(cond, errstr ...) do{ if ((cond) == 0){err=__LINE__;printf(errstr); goto error;} }while(0)
-#define creterror(errstr ...) do{printf(errstr);err=__LINE__; goto error; }while(0)
+#define cassure(a) do{ if ((a) == 0){err=-__LINE__; goto error;} }while(0)
+#define cretassure(cond, errstr ...) do{ if ((cond) == 0){err=-__LINE__;printf(errstr); goto error;} }while(0)
+#define creterror(errstr ...) do{printf(errstr);err=-__LINE__; goto error; }while(0)
+
+struct GB_CfgRTCReal{
+  uint8_t s;   //seconds 0-59
+  uint8_t m;   //minute 0-59
+  uint8_t h;   //hour   0-23
+  uint8_t d;   //day    0-30
+  uint8_t mon; //month  0-11
+  uint8_t year;//year   0-255 (+1970) -> 1970-2225
+  int8_t utcOffset;
+};
 
 struct __attribute__((packed)) GbRtc {
   uint8_t seconds;
