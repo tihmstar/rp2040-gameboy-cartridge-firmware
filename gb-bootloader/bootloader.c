@@ -42,10 +42,14 @@
 #define SMEM_ADDR_REALTIME_CONTROL    ((UBYTE *)(0xB018))
 #define SMEM_ADDR_REALTIME            ((UBYTE *)(0xB020))
 
+#define SMEM_ADDR_ROMTIME_CONTROL    ((UBYTE *)(0xB030))
+#define SMEM_ADDR_ROMTIME            ((UBYTE *)(0xB032))
+
+
 #define SMEM_GAME_START_MAGIC 42
-#define SMEM_REALTIME_GET_MAGIC 69
-#define SMEM_REALTIME_SET_MAGIC 13
-#define SMEM_REALTIME_IDLE_MAGIC 37
+#define SMEM_RTC_GET_MAGIC 69
+#define SMEM_RTC_SET_MAGIC 13
+#define SMEM_RTC_IDLE_MAGIC 37
 
 #pragma mark colors
 #define DMG_BKG_SELECTED_PALETTE    DMG_PALETTE(DMG_DARK_GRAY, DMG_LITE_GRAY, DMG_BLACK, DMG_WHITE);
@@ -518,6 +522,7 @@ uint8_t drawscreenGameSettingsRTC(){
   
   if (rtc_needs_commiting & RTC_COMMITING_MASK_REAL){
     storeRealtimeRTC(&real_rtc);
+    loadROMRTCForGame(gLastSelectedGame, &rom_rtc);
   }
 
   if (gForceDrawScreen){    
@@ -786,6 +791,24 @@ void sanitizeRTCRom(struct CfgRTCROM *rtc){
 }
 
 #pragma mark rp2040 communication functions
+void _internal_rtc_io_wait(uint8_t *addr, uint8_t startsignal){
+  *addr = startsignal;
+  while (*addr != SMEM_RTC_IDLE_MAGIC);
+}
+void _internal_rtc_io_wait_end(){
+  return;
+}
+
+void rtc_io_wait(uint8_t *addr, uint8_t startsignal){
+  static void (*f_ram_wait)(uint8_t *, uint8_t) = NULL;
+  if (f_ram_wait == NULL){
+    uint16_t funcSize = (uint8_t*)_internal_rtc_io_wait_end - (uint8_t*)_internal_rtc_io_wait;
+    f_ram_wait = (void(*)(uint8_t *, uint8_t))malloc(funcSize);
+    memcpy(f_ram_wait,_internal_rtc_io_wait,funcSize);
+  }
+  return f_ram_wait(addr,startsignal);
+}
+
 void startGame(uint8_t game, uint8_t mode) {
   *SMEM_ADDR_GAME_MODE_SELECTOR = mode;
   *SMEM_ADDR_GAME_SELECTOR = game;
@@ -797,30 +820,23 @@ void startGame(uint8_t game, uint8_t mode) {
 }
 
 void loadROMRTCForGame(uint8_t game, struct CfgRTCROM *rtc){
-#warning TODO: read this like a normal game would
-  (void)game;
-  rtc->s = 59;
-  rtc->m = 37;
-  rtc->h = 1;
-  rtc->dl = 0xa5;
-  rtc->dh = 0b11000001;
-  sanitizeRTCRom(rtc);
+  *SMEM_ADDR_GAME_SELECTOR = game;
+  rtc_io_wait(SMEM_ADDR_ROMTIME_CONTROL, SMEM_RTC_GET_MAGIC);
+  memcpy(rtc, SMEM_ADDR_ROMTIME, sizeof(*rtc));
 }
 
 void loadRealtimeRTC(struct CfgRTCReal *rtc){
-  *SMEM_ADDR_REALTIME_CONTROL = SMEM_REALTIME_GET_MAGIC;
-  while (*SMEM_ADDR_REALTIME_CONTROL != SMEM_REALTIME_IDLE_MAGIC) vsync();
+  rtc_io_wait(SMEM_ADDR_REALTIME_CONTROL, SMEM_RTC_GET_MAGIC);
   memcpy(rtc, SMEM_ADDR_REALTIME, sizeof(*rtc));
 }
 
 void storeROMRTCForGame(uint8_t game, struct CfgRTCROM *rtc){
-#warning TODO: write this from rp2040
-  (void)game;
-  (void)rtc;
+  *SMEM_ADDR_GAME_SELECTOR = game;
+  memcpy(SMEM_ADDR_ROMTIME, rtc, sizeof(*rtc));
+  rtc_io_wait(SMEM_ADDR_ROMTIME_CONTROL, SMEM_RTC_SET_MAGIC);
 }
 
 void storeRealtimeRTC(struct CfgRTCReal *rtc){
   memcpy(SMEM_ADDR_REALTIME, rtc, sizeof(*rtc));
-  *SMEM_ADDR_REALTIME_CONTROL = SMEM_REALTIME_SET_MAGIC;
-  while (*SMEM_ADDR_REALTIME_CONTROL != SMEM_REALTIME_IDLE_MAGIC) vsync();
+  rtc_io_wait(SMEM_ADDR_REALTIME_CONTROL, SMEM_RTC_SET_MAGIC);
 }

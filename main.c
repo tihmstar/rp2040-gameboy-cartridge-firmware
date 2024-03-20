@@ -70,10 +70,13 @@
 #define SMEM_ADDR_REALTIME_CONTROL    ((uint16_t)(0xB018))
 #define SMEM_ADDR_REALTIME            ((uint16_t)(0xB020))
 
+#define SMEM_ADDR_ROMTIME_CONTROL    ((uint16_t)(0xB030))
+#define SMEM_ADDR_ROMTIME            ((uint16_t)(0xB032))
+
 #define SMEM_GAME_START_MAGIC 42
-#define SMEM_REALTIME_GET_MAGIC 69
-#define SMEM_REALTIME_SET_MAGIC 13
-#define SMEM_REALTIME_IDLE_MAGIC 37
+#define SMEM_RTC_GET_MAGIC 69
+#define SMEM_RTC_SET_MAGIC 13
+#define SMEM_RTC_IDLE_MAGIC 37
 
 const volatile uint8_t *volatile ram_base = NULL;
 const volatile uint8_t *volatile rom_low_base = NULL;
@@ -254,10 +257,12 @@ int main() {
     printf("Game %d was running before reset\n", _lastRunningGame);
 
     if (g_loadedShortRomInfo.numRamBanks > 0) {
-      storeSaveRamInFile(&g_loadedShortRomInfo);
+      if (!storeSaveRamInFile(&g_loadedShortRomInfo)){
+        ws2812b_setRgb(0, 0x10, 0); // light up LED in green
+      }
+      storeFakeTimestamp();
       _lastRunningGame = 0xFF;
     }
-    storeFakeTimestamp();
   }else{
     loadFakeTimestamp();
   }
@@ -367,7 +372,7 @@ void __no_inline_not_in_flash_func(runGbBootloader)(uint8_t *selectedGame,
 
         } else if (addr == SMEM_ADDR_REALTIME_CONTROL){
           switch (data) {
-            case SMEM_REALTIME_GET_MAGIC:
+            case SMEM_RTC_GET_MAGIC:
               {
                 struct GB_CfgRTCReal *gbrtc = (struct GB_CfgRTCReal *)&ram[SMEM_ADDR_REALTIME-SMEM_ADDR_START];
                 time_t rawtime = g_fakeTimestamp + g_fakeTimestampUTCMinOffset;
@@ -379,11 +384,11 @@ void __no_inline_not_in_flash_func(runGbBootloader)(uint8_t *selectedGame,
                 gbrtc->mon = tm->tm_mon;
                 gbrtc->year = tm->tm_year-70;
                 gbrtc->utcOffset = g_fakeTimestampUTCMinOffset / 15;
-                ram[SMEM_ADDR_REALTIME_CONTROL-SMEM_ADDR_START] = SMEM_REALTIME_IDLE_MAGIC;
+                ram[SMEM_ADDR_REALTIME_CONTROL-SMEM_ADDR_START] = SMEM_RTC_IDLE_MAGIC;
               }
               break;
 
-            case SMEM_REALTIME_SET_MAGIC:
+            case SMEM_RTC_SET_MAGIC:
               {
                 struct GB_CfgRTCReal *gbrtc = (struct GB_CfgRTCReal *)&ram[SMEM_ADDR_REALTIME-SMEM_ADDR_START];
                 struct tm tm = {
@@ -398,7 +403,41 @@ void __no_inline_not_in_flash_func(runGbBootloader)(uint8_t *selectedGame,
                 g_fakeTimestampUTCMinOffset = gbrtc->utcOffset * 15;
                 g_fakeTimestamp = rawtime - g_fakeTimestampUTCMinOffset;
                 storeFakeTimestamp();
-                ram[SMEM_ADDR_REALTIME_CONTROL-SMEM_ADDR_START] = SMEM_REALTIME_IDLE_MAGIC;
+                ram[SMEM_ADDR_REALTIME_CONTROL-SMEM_ADDR_START] = SMEM_RTC_IDLE_MAGIC;
+              }
+              break;
+
+            default:
+              break;
+          }
+        } else if (addr == SMEM_ADDR_ROMTIME_CONTROL){
+          switch (data) {
+            case SMEM_RTC_GET_MAGIC:
+              {
+                uint8_t game = ram[SMEM_ADDR_GAME_SELECTOR-SMEM_ADDR_START];
+                struct ShortRomInfo sRI = {};
+                uint64_t savedTimestamp = 0;
+                RomStorage_loadShortRomInfo(game, &sRI);
+                restoreSaveRamFromFile(&sRI, &savedTimestamp);
+                int64_t diff = g_fakeTimestamp - savedTimestamp;
+                if (diff > 0){
+                  GbRtc_ProgressRtcWithSeconds(&g_rtcReal,diff);
+                  storeSaveRamInFile(&sRI);
+                }
+                memcpy(&ram[SMEM_ADDR_ROMTIME-SMEM_ADDR_START], (void*)&g_rtcReal, sizeof(g_rtcReal));
+                ram[SMEM_ADDR_ROMTIME_CONTROL-SMEM_ADDR_START] = SMEM_RTC_IDLE_MAGIC;
+              }
+              break;
+
+            case SMEM_RTC_SET_MAGIC:
+              {
+                uint8_t game = ram[SMEM_ADDR_GAME_SELECTOR-SMEM_ADDR_START];
+                struct ShortRomInfo sRI = {};
+                RomStorage_loadShortRomInfo(game, &sRI);
+                restoreSaveRamFromFile(&sRI, NULL);
+                memcpy((void*)&g_rtcReal, &ram[SMEM_ADDR_ROMTIME-SMEM_ADDR_START], sizeof(g_rtcReal));
+                storeSaveRamInFile(&sRI);
+                ram[SMEM_ADDR_ROMTIME_CONTROL-SMEM_ADDR_START] = SMEM_RTC_IDLE_MAGIC;
               }
               break;
 
@@ -497,31 +536,56 @@ __assert_fail(const char *expr, const char *file, unsigned int line,
     ;
 }
 
-void restoreSaveRamFromFile(const struct ShortRomInfo *shortRomInfo) {
+int restoreSaveRamFromFile(const struct ShortRomInfo *shortRomInfo, uint64_t *savedTimestamp) {
   lfs_file_t file;
   struct lfs_file_config fileconfig = {.buffer = _lfsFileBuffer};
   char filenamebuffer[40] = "saves/";
 
   strcpy(&filenamebuffer[strlen(filenamebuffer)], shortRomInfo->name);
 
-  int lfs_err =
-      lfs_file_opencfg(&_lfs, &file, filenamebuffer, LFS_O_RDONLY, &fileconfig);
+  int lfs_err = lfs_file_opencfg(&_lfs, &file, filenamebuffer, LFS_O_RDONLY, &fileconfig);
 
   if (lfs_err == LFS_ERR_OK) {
+    int err = 0;
     printf("found save at %s\n", filenamebuffer);
 
-    lfs_err =
-        lfs_file_read(&_lfs, &file, ram_memory,
-                      shortRomInfo->numRamBanks * GB_RAM_BANK_SIZE);
+    lfs_err = lfs_file_read(&_lfs, &file, ram_memory, shortRomInfo->numRamBanks * GB_RAM_BANK_SIZE);
     printf("read %d bytes\n", lfs_err);
 
+    //real
+    for (int i=0; i<5; i++){
+      uint32_t w = 0;
+      cassure((lfs_err = lfs_file_read(&_lfs, &file, &w, sizeof(w))) == sizeof(w));
+      _rtcRealPtr[i] = w;
+    }
+    //latched
+    for (int i=0; i<5; i++){
+      uint32_t w = 0;
+      cassure((lfs_err = lfs_file_read(&_lfs, &file, &w, sizeof(w))) == sizeof(w));
+      _rtcLatchPtr[i] = w;
+    }
+    if (savedTimestamp){
+      cassure((lfs_err = lfs_file_read(&_lfs, &file, (void*)savedTimestamp, sizeof(*savedTimestamp))) == sizeof(*savedTimestamp));
+    }
+
+error:
+    if (err){
+      memset((void*)&g_rtcLatched, 0, sizeof(g_rtcLatched));
+      memset((void*)&g_rtcReal, 0, sizeof(g_rtcReal));
+      if (savedTimestamp){
+        *savedTimestamp = g_fakeTimestamp;
+      }
+    }
     if (lfs_err >= 0) {
       lfs_file_close(&_lfs, &file);
     }
+    return err;
+  }else{
+    return -1;
   }
 }
 
-void storeSaveRamInFile(const struct ShortRomInfo *shortRomInfo) {
+int storeSaveRamInFile(const struct ShortRomInfo *shortRomInfo) {
   int err = 0;
   lfs_file_t file;
   int lfs_err;
@@ -532,11 +596,21 @@ void storeSaveRamInFile(const struct ShortRomInfo *shortRomInfo) {
   cassure((lfs_err = lfs_file_opencfg(&_lfs, &file, filenamebuffer,LFS_O_WRONLY | LFS_O_CREAT, &fileconfig)) == LFS_ERR_OK);
   cassure((lfs_err = lfs_file_write(&_lfs, &file, ram_memory, shortRomInfo->numRamBanks * GB_RAM_BANK_SIZE)) == shortRomInfo->numRamBanks * GB_RAM_BANK_SIZE);
 
+  //real
+  for (int i=0; i<5; i++){
+    uint32_t w = _rtcRealPtr[i];
+    cassure((lfs_err = lfs_file_write(&_lfs, &file, &w, sizeof(w))) == sizeof(w));
+  }
+  //latched
+  for (int i=0; i<5; i++){
+    uint32_t w = _rtcLatchPtr[i];
+    cassure((lfs_err = lfs_file_write(&_lfs, &file, &w, sizeof(w))) == sizeof(w));
+  }
+  cassure((lfs_err = lfs_file_write(&_lfs, &file, (void*)&g_fakeTimestamp, sizeof(g_fakeTimestamp))) == sizeof(g_fakeTimestamp));
+
 error:
   lfs_file_close(&_lfs, &file);
-  if (!err){
-    ws2812b_setRgb(0, 0x10, 0); // light up LED in green
-  }
+  return err;
 }
 
 int storeFakeTimestamp(void){

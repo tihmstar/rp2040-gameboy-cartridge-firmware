@@ -42,7 +42,7 @@ void __no_inline_not_in_flash_func(GbRtc_PerformRtcTick)() {
   uint8_t registerToMask = 0;
 
   {
-    if (now - g_lastFakeTimestampUpdate >= USEC_PER_SEC){
+    if ((uint32_t)(now - g_lastFakeTimestampUpdate) >= USEC_PER_SEC){
       g_fakeTimestamp++;
       g_lastFakeTimestampUpdate += USEC_PER_SEC;
     }
@@ -92,4 +92,33 @@ void __no_inline_not_in_flash_func(GbRtc_PerformRtcTick)() {
       }
     }
   }
+}
+
+void GbRtc_ProgressRtcWithSeconds(union GbRtcUnion *gbrtc, uint64_t elapsedSeconds){
+  uint8_t seconds = elapsedSeconds % 60;
+  gbrtc->reg.seconds += seconds;
+  while (gbrtc->reg.seconds >= 60){
+    gbrtc->reg.seconds -= 60;
+    gbrtc->reg.minutes++;
+  }
+  elapsedSeconds /= 60;
+
+  uint8_t minutes = elapsedSeconds % 60;
+  gbrtc->reg.minutes += minutes;
+  while (gbrtc->reg.minutes >= 60){
+    gbrtc->reg.minutes -= 60;
+    gbrtc->reg.hours++;
+  }
+  elapsedSeconds /= 60;
+
+  uint8_t hours = elapsedSeconds % 24;
+  gbrtc->reg.hours += hours;
+  while (gbrtc->reg.hours >= 24){
+    gbrtc->reg.hours -= 24;
+    if (++gbrtc->reg.days == 0) gbrtc->reg.status.days_high = 1;
+  }
+  elapsedSeconds /= 24;
+
+  if (elapsedSeconds + gbrtc->reg.days > 0xff) gbrtc->reg.status.days_high = 1;
+  gbrtc->reg.days = (uint8_t)(elapsedSeconds + gbrtc->reg.days);
 }

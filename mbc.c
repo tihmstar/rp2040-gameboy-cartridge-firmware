@@ -105,7 +105,7 @@ void loadGame(uint8_t game, uint8_t mode) {
   printf("ram banks: %d\n", g_loadedShortRomInfo.numRamBanks);
 
   if (g_loadedShortRomInfo.numRamBanks > 0) {
-    restoreSaveRamFromFile(&g_loadedShortRomInfo);
+    restoreSaveRamFromFile(&g_loadedShortRomInfo, NULL);
   } else {
     _vBlankMode = 0;
   }

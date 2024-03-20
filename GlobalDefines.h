@@ -78,8 +78,8 @@ extern struct ShortRomInfo g_loadedShortRomInfo;
 void setSsi8bit();
 void setSsi32bit();
 void loadDoubleSpeedPio();
-void storeSaveRamInFile(const struct ShortRomInfo *shortRomInfo);
-void restoreSaveRamFromFile(const struct ShortRomInfo *shortRomInfo);
+int storeSaveRamInFile(const struct ShortRomInfo *shortRomInfo);
+int restoreSaveRamFromFile(const struct ShortRomInfo *shortRomInfo, uint64_t *savedTimestamp);
 
 
 /*
