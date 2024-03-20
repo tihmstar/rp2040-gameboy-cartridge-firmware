@@ -19,6 +19,8 @@
 #define A6E4EABE_18C1_4BCB_A021_7C59DEE53104
 
 #include <stdint.h>
+#define USEC_PER_SEC             1000000L
+
 
 #define WS2812_PIN 27
 

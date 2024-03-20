@@ -10,6 +10,9 @@ static uint8_t _currentRegister = 0;
 static uint64_t _lastMilli = 0;
 static uint32_t _millies = 0;
 
+extern volatile uint64_t g_lastFakeTimestampUpdate;
+extern volatile uint64_t g_fakeTimestamp;
+
 void __no_inline_not_in_flash_func(GbRtc_WriteRegister)(uint8_t val) {
   const uint8_t oldHalt = g_rtcReal.reg.status.halt;
 
@@ -37,6 +40,13 @@ void __no_inline_not_in_flash_func(GbRtc_ActivateRegister)(uint8_t reg) {
 void __no_inline_not_in_flash_func(GbRtc_PerformRtcTick)() {
   uint64_t now = time_us_64();
   uint8_t registerToMask = 0;
+
+  {
+    if (now - g_lastFakeTimestampUpdate >= USEC_PER_SEC){
+      g_fakeTimestamp++;
+      g_lastFakeTimestampUpdate += USEC_PER_SEC;
+    }
+  }
 
   if (!g_rtcReal.reg.status.halt) {
     if ((now - _lastMilli) > 1000U) {

@@ -59,9 +59,6 @@
 #include "ws2812b_spi.h"
 
 #include "gameboy_bus.pio.h"
-#define USEC_PER_SEC             1000000L
-
-
 
 #define SMEM_ADDR_START               ((uint16_t)(0xA000))
 #define SMEM_ADDR_LED_CONTROL         ((uint16_t)(0xB010))
@@ -85,6 +82,7 @@ volatile uint32_t rom_high_base_flash_direct = 0;
 volatile uint8_t *_rtcLatchPtr = &g_rtcLatched.reg.seconds;
 volatile uint8_t *_rtcRealPtr = &g_rtcReal.reg.seconds;
 
+
 uint8_t memory[GB_ROM_BANK_SIZE * 3] __attribute__((aligned(GB_ROM_BANK_SIZE)));
 uint8_t memory_vblank_hook_bank[0x200] __attribute__((aligned(0x200)));
 uint8_t memory_vblank_hook_bank2[0x200] __attribute__((aligned(0x200)));
@@ -95,6 +93,7 @@ ram_memory[(GB_MAX_RAM_BANKS + 1) * GB_RAM_BANK_SIZE]
 volatile union GbRtcUnion __attribute__((section(".noinit."))) g_rtcReal;
 volatile union GbRtcUnion __attribute__((section(".noinit."))) g_rtcLatched;
 volatile uint64_t __attribute__((section(".noinit."))) g_fakeTimestamp;
+volatile uint64_t __attribute__((section(".noinit."))) g_lastFakeTimestampUpdate;
 volatile int16_t __attribute__((section(".noinit."))) g_fakeTimestampUTCMinOffset;
 
 uint8_t g_numRoms = 0;
@@ -122,7 +121,7 @@ void tickFakeTimestamp(void);
 int main() {
   // bi_decl(bi_program_description("Sample binary"));
   // bi_decl(bi_1pin_with_name(LED_PIN, "on-board PIN"));
-
+  g_lastFakeTimestampUpdate = 0;
   {
     vreg_set_voltage(VREG_VOLTAGE_1_15);
     sleep_ms(2);
@@ -592,13 +591,11 @@ error:
   return err;
 }
 
-void tickFakeTimestamp(void){
-  static uint64_t _lastTimestampUpdate = 0;
-  
+void tickFakeTimestamp(void){  
   uint64_t curTime = time_us_64();
-  uint64_t diff = (curTime - _lastTimestampUpdate) / USEC_PER_SEC;
+  uint64_t diff = (curTime - g_lastFakeTimestampUpdate) / USEC_PER_SEC;
   if (diff > 0){
     g_fakeTimestamp += diff;
-    _lastTimestampUpdate += diff*USEC_PER_SEC;
+    g_lastFakeTimestampUpdate += diff*USEC_PER_SEC;
   }
 }

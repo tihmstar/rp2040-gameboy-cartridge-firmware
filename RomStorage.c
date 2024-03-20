@@ -215,7 +215,7 @@ int RomStorage_StartNewRomTransfer(uint16_t num_banks, uint16_t speedSwitchBank,
     return -1;
   }
 
-  memcpy(&_fileNameBuffer[6], name, 17);
+  snprintf(_fileNameBuffer, sizeof(_fileNameBuffer), ROMS_DIR_PATH "%s", name);
   lfs_err = lfs_stat(_lfs, _fileNameBuffer, &lfsInfo);
   if (lfs_err >= 0) {
     printf("%s already exists\n", _fileNameBuffer);
@@ -366,8 +366,8 @@ int RomStorage_DeleteRom(uint8_t rom) {
 
   cassure(!RomStorage_loadShortRomInfo(rom, &sRI));
 
-  memcpy(&_fileNameBuffer[6], sRI.name, 17);
-  memcpy(&_filenamebufferSaves[6], sRI.name, 17);
+  snprintf(_fileNameBuffer, sizeof(_fileNameBuffer), ROMS_DIR_PATH "%s", sRI.name);
+  snprintf(_filenamebufferSaves, sizeof(_filenamebufferSaves), SAVES_DIR_PATH "%s", sRI.name);
 
   printf("Deleting ROM %d, %s\n", rom, _fileNameBuffer);
   printf("Deleting savegame %s\n", _filenamebufferSaves);
@@ -409,7 +409,7 @@ int RomStorage_StartRamDownload(uint8_t rom) {
 
   _ramTransferActive = true;
 
-  memcpy(&_filenamebufferSaves[6], g_loadedShortRomInfo.name, 17);
+  snprintf(_filenamebufferSaves, sizeof(_filenamebufferSaves), SAVES_DIR_PATH "%s", g_loadedShortRomInfo.name);
 
   printf("Loading savefile %d, %s\n", rom, _filenamebufferSaves);
 
@@ -475,7 +475,7 @@ int RomStorage_StartRamUpload(uint8_t rom) {
 
   _ramTransferActive = true;
 
-  memcpy(&_filenamebufferSaves[6], g_loadedShortRomInfo.name, 17);
+  snprintf(_filenamebufferSaves, sizeof(_filenamebufferSaves), SAVES_DIR_PATH "%s", g_loadedShortRomInfo.name);
 
   printf("Opening savefile %d, %s\n", rom, _filenamebufferSaves);
 
@@ -545,7 +545,7 @@ const int RomStorage_LoadRom(uint8_t rom) {
 
   RomStorage_loadShortRomInfo(rom, &g_loadedShortRomInfo);
 
-  memcpy(&_fileNameBuffer[6], g_loadedShortRomInfo.name, 17);
+  snprintf(_fileNameBuffer, sizeof(_fileNameBuffer), ROMS_DIR_PATH "%s", g_loadedShortRomInfo.name);
 
   printf("Loading ROM %d, %s\n", rom, _fileNameBuffer);
 
