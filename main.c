@@ -173,9 +173,6 @@ int main() {
   gpio_set_function(WS2812_PIN, GPIO_FUNC_SPI);
   ws2812b_setRgb(0, 0, 0);
 
-  memset((void *)&g_rtcLatched, 0, sizeof(g_rtcLatched));
-  memset((void *)&g_rtcReal, 0, sizeof(g_rtcLatched));
-
   // Load the gameboy_bus programs into it's respective PIOs
   _offset_main = pio_add_program(pio1, &gameboy_bus_program);
   uint offset_detect_a14 =
@@ -556,12 +553,14 @@ int restoreSaveRamFromFile(const struct ShortRomInfo *shortRomInfo, uint64_t *sa
     for (int i=0; i<5; i++){
       uint32_t w = 0;
       cassure((lfs_err = lfs_file_read(&_lfs, &file, &w, sizeof(w))) == sizeof(w));
+      printf("[%d] load real: %d\n",i,w);
       _rtcRealPtr[i] = w;
     }
     //latched
     for (int i=0; i<5; i++){
       uint32_t w = 0;
       cassure((lfs_err = lfs_file_read(&_lfs, &file, &w, sizeof(w))) == sizeof(w));
+      printf("[%d] load latch: %d\n",i,w);
       _rtcLatchPtr[i] = w;
     }
     if (savedTimestamp){
@@ -593,17 +592,19 @@ int storeSaveRamInFile(const struct ShortRomInfo *shortRomInfo) {
   char filenamebuffer[40];
   snprintf(filenamebuffer,sizeof(filenamebuffer)-1,SAVES_DIR_PATH "%s",(const char *)&(shortRomInfo->name));
 
-  cassure((lfs_err = lfs_file_opencfg(&_lfs, &file, filenamebuffer,LFS_O_WRONLY | LFS_O_CREAT, &fileconfig)) == LFS_ERR_OK);
+  cassure((lfs_err = lfs_file_opencfg(&_lfs, &file, filenamebuffer, LFS_O_TRUNC | LFS_O_WRONLY | LFS_O_CREAT, &fileconfig)) == LFS_ERR_OK);
   cassure((lfs_err = lfs_file_write(&_lfs, &file, ram_memory, shortRomInfo->numRamBanks * GB_RAM_BANK_SIZE)) == shortRomInfo->numRamBanks * GB_RAM_BANK_SIZE);
 
   //real
   for (int i=0; i<5; i++){
     uint32_t w = _rtcRealPtr[i];
+    printf("[%d] store real: %d\n",i,w);
     cassure((lfs_err = lfs_file_write(&_lfs, &file, &w, sizeof(w))) == sizeof(w));
   }
   //latched
   for (int i=0; i<5; i++){
     uint32_t w = _rtcLatchPtr[i];
+    printf("[%d] store latch: %d\n",i,w);
     cassure((lfs_err = lfs_file_write(&_lfs, &file, &w, sizeof(w))) == sizeof(w));
   }
   cassure((lfs_err = lfs_file_write(&_lfs, &file, (void*)&g_fakeTimestamp, sizeof(g_fakeTimestamp))) == sizeof(g_fakeTimestamp));
