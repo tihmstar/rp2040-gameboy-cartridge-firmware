@@ -289,10 +289,7 @@ uint8_t drawscreenGameMenu(void) {
     gCursor = gLastSelectedGame;
     gPageCursor = gLastSelectedGamePage;
 
-    if (buttonPressed(J_SELECT)) {
-      return MENU_SYSTEM_INFO;
-
-    }else if (buttonPressed(J_START)) {
+    if (buttonPressed(J_START)) {
       return MENU_GAME_SETTINGS;
 
     }else if (buttonPressed(J_A)) {
